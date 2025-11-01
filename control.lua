@@ -103,21 +103,44 @@ function built_entity(e)
         entity = e.destination -- this is the name of the entity from on_entity_cloned
     end
 
+    if not string.find(entity.name, "balancer") 
+        and not string.find(entity.type, "belt") 
+        and entity.type ~= "entity-ghost"
+        and entity.type ~= "splitter" 
+        and not string.find(entity.name, ".*mdrn%-loader") then
+        return
+    end
+
     if entity.name == "balancer-part" then
         part_functions.built(entity)
     end
 
-    if entity.type == "transport-belt" then
-        belt_functions.built_belt(entity)
-    end
-
-    if entity.type == "underground-belt" then
+    if string.find(entity.type, "belt") or string.find(entity.name, ".*mdrn%-loader") then
         belt_functions.built_belt(entity)
     end
 
     if entity.type == "splitter" then
         belt_functions.built_splitter(entity)
     end
+
+    -- if entity.type == "entity-ghost" then
+    --     -- in case of ghost, need to check what it is a ghost of
+    --     local ghost_name = entity.ghost_name
+    --     game.print(ghost_name)
+    --     print(ghost_name)
+
+    --     if ghost_name == "balancer-part" then
+    --         part_functions.built(entity)
+    --     end
+
+    --     if string.find(game.entity_prototypes[ghost_name].type, "belt") or string.find(ghost_name, ".*mdrn%-loader") then
+    --         belt_functions.built_belt(entity)
+    --     end
+
+    --     if game.entity_prototypes[ghost_name].type == "splitter" then
+    --         belt_functions.built_splitter(entity)
+    --     end
+    -- end
 end
 
 script.on_event(

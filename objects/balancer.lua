@@ -138,11 +138,10 @@ function balancer_functions.recalculate_nth_tick(balancer_index)
         for _, belt in pairs(stack_part.output_belts) do
             local stack_belt = storage.belts[belt]
 			
-	    -- Check if belt is not a nil value
-	    if not stack_belt or stack_belt == nil then
-	        goto continue
-	    end
-			
+            -- Check if belt is not a nil value
+            if not stack_belt or stack_belt == nil or not stack_belt.entity.valid then
+                goto continue
+            end
             local belt_speed = stack_belt.entity.prototype.belt_speed
             local ticks_per_tile = 0.25 / belt_speed
             local nth_tick = math.floor(ticks_per_tile)
@@ -188,11 +187,11 @@ function balancer_functions.run(balancer_index)
     local balancer = storage.balancer[balancer_index]
     local output_lane_count = table_size(balancer.output_lanes)
     if output_lane_count == 0 then
-	return
+	    return
     end
     local next_lane_count = table_size(balancer.input_lanes)
     if next_lane_count == 0 then
-	return
+	    return
     end
 
     -- get how many items are needed per lane
@@ -203,28 +202,30 @@ function balancer_functions.run(balancer_index)
 
     -- INPUT
     while gather_amount > 0 and next_lane_count > 0 do
-	local current_lanes = next_lanes
-	next_lanes = {}
-	next_lane_count = 0
-	for _, lane in pairs(current_lanes) do
-	    if #lane > 0 then
-		-- remove item from lane and add to buffer
-		local item = lane[1]
-		buffer_count = buffer_count + 1
-		balancer.buffer[buffer_count] = stablize_item_stack(item)
-		lane.remove_item(item)
-		gather_amount = gather_amount - 1
+        local current_lanes = next_lanes
+        next_lanes = {}
+        next_lane_count = 0
+        for _, lane in pairs(current_lanes) do
+            game.print("Checking lane ")
+            game.print( lane)
+            if lane and lane.valid and #lane > 0 then
+                -- remove item from lane and add to buffer
+                local item = lane[1]
+                buffer_count = buffer_count + 1
+                balancer.buffer[buffer_count] = stablize_item_stack(item)
+                lane.remove_item(item)
+                gather_amount = gather_amount - 1
 
-		if #lane > 0 then
-		    next_lane_count = next_lane_count + 1
-		    next_lanes[next_lane_count] = lane
-		end
-	    end
-	end
+                if #lane > 0 then
+                    next_lane_count = next_lane_count + 1
+                    next_lanes[next_lane_count] = lane
+                end
+            end
+        end
     end
 
     if buffer_count == 0 then
-	return
+	    return
     end
     
     -- OUTPUT
@@ -232,21 +233,22 @@ function balancer_functions.run(balancer_index)
     local lane_index, lane
     local input = balancer.buffer[1]
     if not starting_index then -- if we don't have a place to start, then we start at the beginning
-	lane_index, lane = next(balancer.output_lanes)
+	    lane_index, lane = next(balancer.output_lanes)
     else
-	lane_index = starting_index
-	lane = balancer.output_lanes[starting_index]
+        lane_index = starting_index
+        lane = balancer.output_lanes[starting_index]
     end
 
     local function try_insert_and_next()
-	if lane and lane.insert_at_back(input, input.count) then
-	    table.remove(balancer.buffer, 1)
-	    input = balancer.buffer[1]
-	    lane_index, lane = next(balancer.output_lanes, lane_index)
-	    balancer.next_output = lane_index
-	else
-	    lane_index, lane = next(balancer.output_lanes, lane_index)
-	end
+        game.print(lane)
+        if lane and lane.valid and lane.insert_at_back(input, input.count) then
+            table.remove(balancer.buffer, 1)
+            input = balancer.buffer[1]
+            lane_index, lane = next(balancer.output_lanes, lane_index)
+            balancer.next_output = lane_index
+        else
+            lane_index, lane = next(balancer.output_lanes, lane_index)
+        end
     end
 
     try_insert_and_next()

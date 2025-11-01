@@ -1,5 +1,6 @@
 part_functions = {}
 
+
 ---built
 ---@param entity LuaEntity The part-entity, that is built
 function part_functions.built(entity)
@@ -15,9 +16,18 @@ end
 ---@return Part
 function part_functions.get_or_create(entity)
     local storage_part = storage.parts[entity.unit_number]
+    local output = ""
     if storage_part then
+        output = "balancer loaded: " .. entity.unit_number
+        game.print(output)
+        print(output)
         return storage_part
     end
+
+    output = "balancer created: " .. entity.unit_number
+    game.print(output)
+    print(output)
+
 
     ---@type Part
     local part = {}
@@ -211,6 +221,10 @@ function part_functions.remove(entity, buffer)
     for _, belt_index in pairs(part.input_belts) do
         local belt = storage.belts[belt_index]
 
+        if not belt or belt == nil or not belt.valid then
+        	goto continue
+        end
+
         -- only remove lanes, if this is splitter
         if belt.type == "splitter" then
             local into_pos, _ = belt_functions.get_input_output_pos_splitter(belt.entity)
@@ -228,15 +242,15 @@ function part_functions.remove(entity, buffer)
             end
 
             -- check if lanes are still in the balancer
-	    if balancer then
-		local found_lane = false
-		for lane, _ in pairs(balancer.input_lanes) do
-		    if table.contains(belt.lanes, lane) then
-			found_lane = true
-			break
-		    end
-		end
-	    end
+            if balancer then
+                local found_lane = false
+                for lane, _ in pairs(balancer.input_lanes) do
+                    if table.contains(belt.lanes, lane) then
+                    found_lane = true
+                    break
+                    end
+                end
+	        end
 
             -- when lane not found, remove balancer from belt
             if not found_lane then
@@ -247,22 +261,24 @@ function part_functions.remove(entity, buffer)
             belt.output_balancer[part.balancer] = nil
 
             -- remove lanes from balancer
-	    if balancer then
-		for _, lane in pairs(belt.lanes) do
-		    balancer.input_lanes[lane] = nil
-		end
-	    end
+            if balancer then
+                for _, lane in pairs(belt.lanes) do
+                    balancer.input_lanes[lane] = nil
+                end
+            end
         end
 
         -- check if belt is still attached to a part
         belt_functions.check_track(belt_index)
+
+        ::continue::
     end
 
     for _, belt_index in pairs(part.output_belts) do
         local belt = storage.belts[belt_index]
 		
         -- Check if belt is not a nil value
-        if not belt or belt == nil then
+        if not belt or belt == nil or not belt.valid then
         	goto continue
         end
 		
@@ -288,14 +304,14 @@ function part_functions.remove(entity, buffer)
 
             -- check if lanes are still in the balancer
             local found_lane = false
-	    if balancer then
-		for lane, _ in pairs(balancer.output_lanes) do
-		    if table.contains(belt.lanes, lane) then
-			found_lane = true
-			break
-		    end
-		end
-	    end
+            if balancer then
+                for lane, _ in pairs(balancer.output_lanes) do
+                    if table.contains(belt.lanes, lane) then
+                        found_lane = true
+                        break
+                    end
+                end
+            end
 
             -- when lane not found, remove balancer from belt
             if not found_lane then
@@ -306,39 +322,40 @@ function part_functions.remove(entity, buffer)
             belt.input_balancer[part.balancer] = nil
 
             -- remove lanes from balancer
-	    if balancer then
-		for _, lane in pairs(belt.lanes) do
-		    -- make sure it doesn't pick this one next
-		    if balancer.next_output == lane then 
-			balancer.next_output = next(balancer.output_lanes, balancer.next_output)
-		    end
-		    balancer.output_lanes[lane] = nil
-		end
-	    end
+            if balancer then
+                for _, lane in pairs(belt.lanes) do
+                    -- make sure it doesn't pick this one next
+                    if balancer.next_output == lane then 
+                    balancer.next_output = next(balancer.output_lanes, balancer.next_output)
+                    end
+                    balancer.output_lanes[lane] = nil
+                end
+            end
         end
 
         -- check if belt is still attached to a part
         belt_functions.check_track(belt_index)
+        ::continue::
     end
 
     -- recalculate nth_tick, if no part is there, this will unregister the balancer
     if balancer then
-	balancer_functions.recalculate_nth_tick(balancer.unit_number)
+        balancer_functions.recalculate_nth_tick(balancer.unit_number)
 
-	---@type Item_drop_param
-	local drop_to = {
-	    buffer = buffer,
-	    position = entity.position,
-	    surface = entity.surface,
-	    force = entity.force
-	}
+        ---@type Item_drop_param
+        local drop_to = {
+            buffer = buffer,
+            position = entity.position,
+            surface = entity.surface,
+            force = entity.force
+        }
 
-	-- check if balancer is valid
-	local check_track_result = balancer_functions.check_track(balancer.unit_number, drop_to)
-	if check_track_result then
-	    -- check if balancer is still in one part
-	    balancer_functions.check_connected(balancer.unit_number, drop_to)
-	end
+        -- check if balancer is valid
+        local check_track_result = balancer_functions.check_track(balancer.unit_number, drop_to)
+        if check_track_result then
+            -- check if balancer is still in one part
+            balancer_functions.check_connected(balancer.unit_number, drop_to)
+        end
     end
 end
 

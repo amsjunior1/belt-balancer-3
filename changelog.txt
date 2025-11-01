@@ -1,48 +1,5 @@
----------------------------------------------------------------------------------------------------
-Version: 2.0.8
-Date: 24.10.2024
-  Bugfix:
-    - Fix collision mask for balancers, they can now be placed like how belts can
-    - Add recipes and research for turbo belts (Space Age)
-    - Fix crash when repair packs go through balancers
----------------------------------------------------------------------------------------------------
-Version: 2.0.7
-Date: 23.10.2024
-  Bugfix:
-    - Fix crash when balancers are destroyed
-    - Properly handle stacks, and spoil timers
----------------------------------------------------------------------------------------------------
-Version: 2.0.6
-Date: 22.10.2024
-  Bugfix:
-    - Fix not having collision with stuff like belts
----------------------------------------------------------------------------------------------------
-Version: 2.0.5
-Date: 22.10.2024
-  Bugfix:
-    - Fix not having collision with stuff like belts
----------------------------------------------------------------------------------------------------
-Version: 2.0.4
-Date: 22.10.2024
-  Bugfix:
-    - Fix crash when removing balancers
----------------------------------------------------------------------------------------------------
-Version: 2.0.3
-Date: 21.10.2024
-  Bugfix:
-    - Fix collisions being removed properly
----------------------------------------------------------------------------------------------------
-Version: 2.0.2
-Date: 21.10.2024
-  Bugfix:
-    - Disable removing collision for now
----------------------------------------------------------------------------------------------------
-Version: 2.0.1
-Date: 21.10.2024
-  Bugfix:
-    - Fix disabling collision making it hard to properly place balancers
----------------------------------------------------------------------------------------------------
-Version: 2.0.0
-Date: 21.10.2024
+Version: 3.0.0
+Date: 01.11.2025
   Changes:
-    - Update to 2.0/Space Age
+    - Fixing bugs by version 2
+    - Now can place belt balancer into plataform space

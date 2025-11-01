@@ -196,6 +196,15 @@ function belt_functions.built_belt(belt)
             from_part = nil
         end
     end
+    if script.active_mods["loaders-modernized"] then
+        if string.find(belt.name, ".*mdrn%-loader") then
+            if belt.loader_type == "input" then
+                into_part = nil
+            elseif belt.loader_type == "output" then
+                from_part = nil
+            end
+        end
+    end
 
     if into_part then
         local stack_belt = belt_functions.get_or_create(belt)
