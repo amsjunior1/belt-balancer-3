@@ -206,8 +206,6 @@ function balancer_functions.run(balancer_index)
         next_lanes = {}
         next_lane_count = 0
         for _, lane in pairs(current_lanes) do
-            game.print("Checking lane ")
-            game.print( lane)
             if lane and lane.valid and #lane > 0 then
                 -- remove item from lane and add to buffer
                 local item = lane[1]
@@ -240,7 +238,6 @@ function balancer_functions.run(balancer_index)
     end
 
     local function try_insert_and_next()
-        game.print(lane)
         if lane and lane.valid and lane.insert_at_back(input, input.count) then
             table.remove(balancer.buffer, 1)
             input = balancer.buffer[1]

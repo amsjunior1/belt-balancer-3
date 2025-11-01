@@ -19,15 +19,8 @@ function part_functions.get_or_create(entity)
     local output = ""
     if storage_part then
         output = "balancer loaded: " .. entity.unit_number
-        game.print(output)
-        print(output)
         return storage_part
     end
-
-    output = "balancer created: " .. entity.unit_number
-    game.print(output)
-    print(output)
-
 
     ---@type Part
     local part = {}
@@ -204,15 +197,18 @@ end
 ---@param buffer LuaInventory
 function part_functions.remove(entity, buffer)
     local part = storage.parts[entity.unit_number]
+    if not part then
+        return
+    end
     local balancer = storage.balancer[part.balancer]
 
-    if not balancer then
-	game.print("removed `cursed' part")
+    if not balancer or not balancer.valid then
+	    -- game.print("removed `cursed' part")
     end
 
     -- remove part from balancer
     if balancer then
-	balancer.parts[entity.unit_number] = nil
+	    balancer.parts[entity.unit_number] = nil
     end
 
     -- remove part from storage stack

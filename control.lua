@@ -94,7 +94,6 @@ end
 function built_entity(e)
     ---@type LuaEntity
     local entity
-
     if e.entity then
         entity = e.entity
     elseif e.created_entity then
@@ -103,9 +102,12 @@ function built_entity(e)
         entity = e.destination -- this is the name of the entity from on_entity_cloned
     end
 
+    if not entity or not entity.valid then
+        return
+    end
+
     if not string.find(entity.name, "balancer") 
         and not string.find(entity.type, "belt") 
-        and entity.type ~= "entity-ghost"
         and entity.type ~= "splitter" 
         and not string.find(entity.name, ".*mdrn%-loader") then
         return
@@ -122,25 +124,6 @@ function built_entity(e)
     if entity.type == "splitter" then
         belt_functions.built_splitter(entity)
     end
-
-    -- if entity.type == "entity-ghost" then
-    --     -- in case of ghost, need to check what it is a ghost of
-    --     local ghost_name = entity.ghost_name
-    --     game.print(ghost_name)
-    --     print(ghost_name)
-
-    --     if ghost_name == "balancer-part" then
-    --         part_functions.built(entity)
-    --     end
-
-    --     if string.find(game.entity_prototypes[ghost_name].type, "belt") or string.find(ghost_name, ".*mdrn%-loader") then
-    --         belt_functions.built_belt(entity)
-    --     end
-
-    --     if game.entity_prototypes[ghost_name].type == "splitter" then
-    --         belt_functions.built_splitter(entity)
-    --     end
-    -- end
 end
 
 script.on_event(
@@ -148,7 +131,9 @@ script.on_event(
         defines.events.on_built_entity,
         defines.events.on_robot_built_entity,
         defines.events.script_raised_built,
+        defines.events.on_space_platform_built_entity,
         defines.events.script_raised_revive,
+        defines.events.on_post_entity_died,
         defines.events.on_entity_cloned -- fix compatability with region cloner
     },
     built_entity
@@ -164,15 +149,18 @@ function remove_entity(e)
         entity = e.created_entity
     end
 
+    if not string.find(entity.name, "balancer") 
+        and not string.find(entity.type, "belt") 
+        and entity.type ~= "splitter" 
+        and not string.find(entity.name, ".*mdrn%-loader") then
+        return
+    end
+
     if entity.name == "balancer-part" then
         part_functions.remove(entity, e.buffer)
     end
 
-    if entity.type == "transport-belt" then
-        belt_functions.remove_belt(entity)
-    end
-
-    if entity.type == "underground-belt" then
+    if string.find(entity.type, "belt") or string.find(entity.name, ".*mdrn%-loader") then
         belt_functions.remove_belt(entity)
     end
 
@@ -194,6 +182,11 @@ script.on_event(
 script.on_event({ defines.events.on_player_rotated_entity },
     function(e)
         if e.entity.type == "transport-belt" then
+            belt_functions.remove_belt(e.entity, e.previous_direction)
+            belt_functions.built_belt(e.entity)
+        end
+
+        if string.find(e.entity.name, ".*mdrn%-loader") then
             belt_functions.remove_belt(e.entity, e.previous_direction)
             belt_functions.built_belt(e.entity)
         end
