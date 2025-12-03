@@ -32,8 +32,13 @@ script.on_configuration_changed(
                 local technologies = force.technologies
                 local recipes = force.recipes
 
-                technologies["belt-balancer-0"].researched = technologies["belt-balancer-1"].researched
-                recipes["belt-balancer-basic-belt"].enabled = technologies["belt-balancer-1"].researched
+                -- Nota: Se você mudou os nomes das tecnologias, pode precisar ajustar aqui depois.
+                if technologies["belt-balancer-0"] and technologies["belt-balancer-1"] then
+                    technologies["belt-balancer-0"].researched = technologies["belt-balancer-1"].researched
+                end
+                if recipes["belt-balancer-basic-belt"] and technologies["belt-balancer-1"] then
+                    recipes["belt-balancer-basic-belt"].enabled = technologies["belt-balancer-1"].researched
+                end
             end
         end
     end
@@ -69,7 +74,6 @@ commands.add_command("belt-balancer-statistics", "", function(e)
 end)
 
 -- only add this command, if `debug` is available and creative-mod is activated
--- `debug` can be activated, when calling factorio with `--instrument-mod belt-balancer`
 if debug and script.active_mods["creative-mod"] then
     commands.add_command("belt-balancer-test", "", function(e)
         test_mod(e.player_index)
@@ -99,13 +103,14 @@ function built_entity(e)
     elseif e.created_entity then
         entity = e.created_entity
     else
-        entity = e.destination -- this is the name of the entity from on_entity_cloned
+        entity = e.destination 
     end
 
     if not entity or not entity.valid then
         return
     end
 
+    -- Filtro inicial genérico (já pega qualquer coisa com 'balancer' no nome)
     if not string.find(entity.name, "balancer") 
         and not string.find(entity.type, "belt") 
         and entity.type ~= "splitter" 
@@ -113,9 +118,13 @@ function built_entity(e)
         return
     end
 
-    if entity.name == "balancer-part" then
+    -- === ALTERAÇÃO PRINCIPAL AQUI ===
+    -- Antes: if entity.name == "balancer-part" then
+    -- Agora: Aceita o antigo E qualquer nome que contenha "belt-balancer"
+    if entity.name == "balancer-part" or string.find(entity.name, "belt%-balancer") then
         part_functions.built(entity)
     end
+    -- ================================
 
     if string.find(entity.type, "belt") or string.find(entity.name, ".*mdrn%-loader") then
         belt_functions.built_belt(entity)
@@ -134,7 +143,7 @@ script.on_event(
         defines.events.on_space_platform_built_entity,
         defines.events.script_raised_revive,
         defines.events.on_post_entity_died,
-        defines.events.on_entity_cloned -- fix compatability with region cloner
+        defines.events.on_entity_cloned 
     },
     built_entity
 )
@@ -156,9 +165,13 @@ function remove_entity(e)
         return
     end
 
-    if entity.name == "balancer-part" then
+    -- === ALTERAÇÃO PRINCIPAL AQUI TAMBÉM ===
+    -- Antes: if entity.name == "balancer-part" then
+    -- Agora: Aceita o antigo E qualquer nome que contenha "belt-balancer"
+    if entity.name == "balancer-part" or string.find(entity.name, "belt%-balancer") then
         part_functions.remove(entity, e.buffer)
     end
+    -- =======================================
 
     if string.find(entity.type, "belt") or string.find(entity.name, ".*mdrn%-loader") then
         belt_functions.remove_belt(entity)
@@ -195,10 +208,8 @@ script.on_event({ defines.events.on_player_rotated_entity },
             belt_functions.remove_belt(e.entity, e.previous_direction)
             belt_functions.built_belt(e.entity)
 
-            -- Neighbour is only the other end
             local neighbour = e.entity.neighbours
             if neighbour and neighbour.valid then
-                -- make neighbour also have previous_direction
                 local previous_direction = (neighbour.direction + 4) % 8
                 belt_functions.remove_belt(neighbour, previous_direction)
                 belt_functions.built_belt(neighbour)
@@ -216,9 +227,7 @@ script.on_event(defines.events.on_tick, function()
     local unit_number = storage.next_belt_check
     local belt = storage.belts[unit_number]
 
-    -- check if belt direction got changed
     if belt and belt.entity.valid and belt.direction ~= belt.entity.direction then
-        -- remove belt and readd it
         if belt.type == "splitter" then
             belt_functions.remove_splitter(belt.entity, belt.direction, unit_number, belt.entity.surface, belt.position)
             belt_functions.built_splitter(belt.entity)

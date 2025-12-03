@@ -4,313 +4,325 @@ require("helper.conversion")
 
 balancer_functions = {}
 
----creates a new balancer object in the storage stack
----This will NOT set the parts and the lanes!!
----@return Balancer the created balancer
-function balancer_functions.new()
-    ---@type Balancer
-    local balancer = {}
+-- ============================================================================
+-- TABELA DE VELOCIDADE BASE (Por Peça de Balancer)
+-- Amarelo: 0.25 items/tick (15/s)
+-- Vermelho: 0.50 items/tick (30/s)
+-- Azul: 0.75 items/tick (45/s)
+-- Turbo: 1.00 items/tick (60/s)
+-- ============================================================================
+local global_speed_limits = {
+    ["balancer-part"] = 0.25,
+    ["balancer-part-fast"] = 0.5,
+    ["balancer-part-express"] = 0.75,
+    ["balancer-part-turbo"] = 1.0,
+    ["belt-balancer"] = 0.25,
+    ["belt-balancer-fast"] = 0.5,
+    ["belt-balancer-express"] = 0.75,
+    ["belt-balancer-turbo"] = 1.0,
+}
 
+function balancer_functions.new()
+    local balancer = {}
     balancer.unit_number = get_next_balancer_unit_number()
     balancer.parts = {}
     balancer.nth_tick = 0
     balancer.buffer = {}
     balancer.input_lanes = {}
     balancer.output_lanes = {}
-
+    
+    balancer.global_accumulator = 0
+    balancer.global_speed = 0.25 
+    
     storage.balancer[balancer.unit_number] = balancer
-
     return balancer
 end
 
----merge two balancer, the first balancer_index is the base, to merge things into.
----The second balancer (balancer_index2) will be deleted after it is merged.
----@param balancer_index uint
----@param balancer_index2 uint
 function balancer_functions.merge(balancer_index, balancer_index2)
     local balancer = storage.balancer[balancer_index]
     local balancer2 = storage.balancer[balancer_index2]
+    
+    if not balancer or not balancer2 then return end
 
     for k, part_index in pairs(balancer2.parts) do
         balancer.parts[k] = part_index
-
-        -- change balancer link on part too
         local part = storage.parts[part_index]
-        part.balancer = balancer_index
-
-        -- change balancer link on belts too
-        for _, belt_index in pairs(part.input_belts) do
-            local belt = storage.belts[belt_index]
-            belt.output_balancer[balancer_index2] = nil
-            belt.output_balancer[balancer_index] = balancer_index
+        if part then
+            part.balancer = balancer_index
+            for _, belt_index in pairs(part.input_belts) do
+                local belt = storage.belts[belt_index]
+                if belt then
+                    belt.output_balancer[balancer_index2] = nil
+                    belt.output_balancer[balancer_index] = balancer_index
+                end
+            end
+            for _, belt_index in pairs(part.output_belts) do
+                local belt = storage.belts[belt_index]
+                if belt then
+                    belt.input_balancer[balancer_index2] = nil
+                    belt.input_balancer[balancer_index] = balancer_index
+                end
+            end
         end
-
-        for _, belt_index in pairs(part.output_belts) do
-            local belt = storage.belts[belt_index]
-            belt.input_balancer[balancer_index2] = nil
-            belt.input_balancer[balancer_index] = balancer_index
-        end
     end
 
-    for k, v in pairs(balancer2.input_lanes) do
-        balancer.input_lanes[k] = v
-    end
-
-    for k, v in pairs(balancer2.output_lanes) do
-        balancer.output_lanes[k] = v
-    end
+    balancer_functions.reload_lanes(balancer_index)
 
     for _, item in pairs(balancer2.buffer) do
         table.insert(balancer.buffer, item)
     end
-
-    -- remove merged balancer from the storage stack
-    storage.balancer[balancer_index2] = nil
-
-    -- unregister nth_tick
-    unregister_on_tick(balancer_index2)
-end
-
----This will find nearby balancer, creates/adds/merges balancer if needed.
----The part is automatically added to the balancer!
----@param part Part The part entity to work from
----@return uint The balancer index, that the part is part of :)
-function balancer_functions.find_from_part(part)
-    if part.balancer ~= nil then
-        return part.balancer
+    
+    if balancer2.global_accumulator then
+        balancer.global_accumulator = (balancer.global_accumulator or 0) + balancer2.global_accumulator
     end
 
-    local entity = part.entity
+    storage.balancer[balancer_index2] = nil
+end
 
+-- ============================================================================
+-- RELOAD LANES: Agora calcula velocidade baseada no NÚMERO DE PEÇAS
+-- ============================================================================
+function balancer_functions.reload_lanes(balancer_index)
+    local balancer = storage.balancer[balancer_index]
+    if not balancer then return end
+
+    balancer.input_lanes = {}
+    balancer.output_lanes = {}
+
+    local main_entity_name = nil
+    local part_count = 0 -- Contador de peças
+
+    for _, part_index in pairs(balancer.parts) do
+        local part = storage.parts[part_index]
+        if part then
+            part_count = part_count + 1 -- Conta +1 peça
+            
+            if part.entity and part.entity.valid then
+                main_entity_name = part.entity.name
+            end
+
+            for _, belt_index in pairs(part.input_belts) do
+                local belt = storage.belts[belt_index]
+                if belt then
+                    for _, lane in pairs(belt.lanes) do
+                        if storage.lanes[lane] then
+                            balancer.input_lanes[lane] = storage.lanes[lane]
+                        end
+                    end
+                end
+            end
+            for _, belt_index in pairs(part.output_belts) do
+                local belt = storage.belts[belt_index]
+                if belt then
+                    for _, lane in pairs(belt.lanes) do
+                        if storage.lanes[lane] then
+                            balancer.output_lanes[lane] = storage.lanes[lane]
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- CORREÇÃO AQUI:
+    -- Velocidade Total = (Velocidade da Tier) * (Número de Peças)
+    -- Exemplo Foto: 0.5 (Red) * 2 (Peças) = 1.0 (60 itens/s)
+    local base_speed = 0.25
+    if main_entity_name then
+        base_speed = global_speed_limits[main_entity_name] or 0.25
+    end
+    
+    -- Se part_count for 0 (erro), assume 1 para não travar
+    if part_count < 1 then part_count = 1 end
+    
+    balancer.global_speed = base_speed * part_count
+    
+    balancer_functions.recalculate_nth_tick(balancer_index)
+end
+
+function balancer_functions.find_from_part(part)
+    if part.balancer ~= nil then return part.balancer end
+    local entity = part.entity
     local nearby_balancer_indices = part_functions.find_nearby_balancer(entity)
     local nearby_balancer_amount = table_size(nearby_balancer_indices)
 
     if nearby_balancer_amount == 0 then
-        -- create new balancer
         local balancer = balancer_functions.new()
         balancer.parts[entity.unit_number] = entity.unit_number
+        balancer_functions.reload_lanes(balancer.unit_number)
         return balancer.unit_number
     elseif nearby_balancer_amount == 1 then
-        -- add to existing balancer
         local balancer
         for _, index in pairs(nearby_balancer_indices) do
             balancer = storage.balancer[index]
-            balancer.parts[entity.unit_number] = entity.unit_number
+            if balancer then
+                balancer.parts[entity.unit_number] = entity.unit_number
+            end
         end
-        return balancer.unit_number
+        if balancer then 
+            balancer_functions.reload_lanes(balancer.unit_number)
+        end
+        return balancer and balancer.unit_number
     elseif nearby_balancer_amount >= 2 then
-        -- add to existing balancer and merge them
-        -- merge fond balancer
         local base_balancer_index
         for _, nearby_balancer_index in pairs(nearby_balancer_indices) do
             if not base_balancer_index then
                 base_balancer_index = nearby_balancer_index
-
-                -- add splitter to balancer
                 local balancer = storage.balancer[nearby_balancer_index]
-                balancer.parts[entity.unit_number] = entity.unit_number
+                if balancer then
+                    balancer.parts[entity.unit_number] = entity.unit_number
+                end
             else
-                -- merge balancer and remove them from storage table
                 balancer_functions.merge(base_balancer_index, nearby_balancer_index)
             end
         end
+        balancer_functions.reload_lanes(base_balancer_index)
         return base_balancer_index
     end
 end
 
----recalculate_nth_tick
----@param balancer_index uint
 function balancer_functions.recalculate_nth_tick(balancer_index)
     local balancer = storage.balancer[balancer_index]
+    if not balancer then return end
 
     if table_size(balancer.input_lanes) == 0 or table_size(balancer.output_lanes) == 0 or table_size(balancer.parts) == 0 then
         unregister_on_tick(balancer_index)
         balancer.nth_tick = 0
         return
     end
-
-    -- recalculate nth_tick
-    local tick_list = {}
-    local run_on_tick_override = false
-
-    for _, part in pairs(balancer.parts) do
-        local stack_part = storage.parts[part]
-        for _, belt in pairs(stack_part.output_belts) do
-            local stack_belt = storage.belts[belt]
-			
-            -- Check if belt is not a nil value
-            if not stack_belt or stack_belt == nil or not stack_belt.entity.valid then
-                goto continue
-            end
-            local belt_speed = stack_belt.entity.prototype.belt_speed
-            local ticks_per_tile = 0.25 / belt_speed
-            local nth_tick = math.floor(ticks_per_tile)
-            if nth_tick ~= ticks_per_tile then
-                run_on_tick_override = true
-                break
-            end
-            tick_list[nth_tick] = nth_tick
-	    ::continue::
-        end
-
-        if run_on_tick_override then
-            break
-        end
-    end
-
-    local smallest_gcd = -1
-    if not run_on_tick_override then
-        for _, tick in pairs(tick_list) do
-            if smallest_gcd == -1 then
-                smallest_gcd = tick
-            elseif smallest_gcd == 1 then
-                break
-            elseif smallest_gcd == tick then
-                -- do nothing
-            else
-                smallest_gcd = math.gcd(smallest_gcd, tick)
-            end
-        end
-    end
-
-    if run_on_tick_override then
-        smallest_gcd = 1
-    end
-    if smallest_gcd ~= -1 and balancer.nth_tick ~= smallest_gcd then
-        balancer.nth_tick = smallest_gcd
+    
+    local target_tick = 1 
+    if balancer.nth_tick ~= target_tick then
+        balancer.nth_tick = target_tick
         unregister_on_tick(balancer_index)
-        register_on_tick(smallest_gcd, balancer_index)
+        register_on_tick(target_tick, balancer_index)
     end
 end
 
 function balancer_functions.run(balancer_index)
     local balancer = storage.balancer[balancer_index]
+    if not balancer then 
+        unregister_on_tick(balancer_index)
+        return 
+    end
+
     local output_lane_count = table_size(balancer.output_lanes)
-    if output_lane_count == 0 then
-	    return
-    end
-    local next_lane_count = table_size(balancer.input_lanes)
-    if next_lane_count == 0 then
-	    return
-    end
+    if output_lane_count == 0 then return end
+    
+    if not balancer.global_accumulator then balancer.global_accumulator = 0 end
+    if not balancer.global_speed then balancer.global_speed = 0.25 end
 
-    -- get how many items are needed per lane
-    local buffer_count = #balancer.buffer
-    local gather_amount = (output_lane_count * 2) - buffer_count
+    -- 1. ACUMULADOR (Agora com velocidade multiplicada por peças)
+    balancer.global_accumulator = balancer.global_accumulator + balancer.global_speed
 
-    local next_lanes = balancer.input_lanes
+    -- Cap ajustado para permitir bufferização maior em balancers gigantes (4x4, 8x8)
+    -- Multiplicamos o Cap um pouco baseado na velocidade para não gargalar balancers grandes
+    local cap = math.max(2.0, balancer.global_speed * 2)
+    if balancer.global_accumulator > cap then balancer.global_accumulator = cap end
 
-    -- INPUT
-    while gather_amount > 0 and next_lane_count > 0 do
-        local current_lanes = next_lanes
-        next_lanes = {}
-        next_lane_count = 0
-        for _, lane in pairs(current_lanes) do
+    -- 2. INPUT
+    local buffer_limit = output_lane_count * 6 
+    local items_in_buffer = #balancer.buffer
+    
+    if items_in_buffer < buffer_limit then
+        for _, lane in pairs(balancer.input_lanes) do
+            if items_in_buffer >= buffer_limit then break end
+            
             if lane and lane.valid and #lane > 0 then
-                -- remove item from lane and add to buffer
                 local item = lane[1]
-                buffer_count = buffer_count + 1
-                balancer.buffer[buffer_count] = stablize_item_stack(item)
-                lane.remove_item(item)
-                gather_amount = gather_amount - 1
-
-                if #lane > 0 then
-                    next_lane_count = next_lane_count + 1
-                    next_lanes[next_lane_count] = lane
+                local simple_stack = stablize_item_stack(item)
+                
+                if simple_stack then
+                    local removed = lane.remove_item(simple_stack)
+                    if removed > 0 then
+                        table.insert(balancer.buffer, simple_stack)
+                        items_in_buffer = items_in_buffer + 1
+                    end
                 end
             end
         end
     end
 
-    if buffer_count == 0 then
-	    return
-    end
-    
-    -- OUTPUT
+    if #balancer.buffer == 0 then return end
+
+    -- 3. OUTPUT
     local starting_index = balancer.next_output
     local lane_index, lane
-    local input = balancer.buffer[1]
-    if not starting_index then -- if we don't have a place to start, then we start at the beginning
-	    lane_index, lane = next(balancer.output_lanes)
-    else
+    
+    if starting_index and balancer.output_lanes[starting_index] then 
         lane_index = starting_index
         lane = balancer.output_lanes[starting_index]
+    else
+        lane_index, lane = next(balancer.output_lanes)
     end
+    if not lane_index then lane_index, lane = next(balancer.output_lanes) end
 
-    local function try_insert_and_next()
-        if lane and lane.valid and lane.insert_at_back(input, input.count) then
-            table.remove(balancer.buffer, 1)
-            input = balancer.buffer[1]
-            lane_index, lane = next(balancer.output_lanes, lane_index)
-            balancer.next_output = lane_index
-        else
-            lane_index, lane = next(balancer.output_lanes, lane_index)
+    local attempts = 0
+    local max_attempts = output_lane_count * 2 
+
+    while balancer.global_accumulator >= 1.0 and #balancer.buffer > 0 and attempts < max_attempts do
+        if not lane_index then 
+            lane_index, lane = next(balancer.output_lanes)
+            if not lane_index then break end
         end
-    end
 
-    try_insert_and_next()
-    while lane_index ~= starting_index and next(balancer.buffer) ~= nil do
-	try_insert_and_next()
+        local inserted = false
+        
+        if lane and lane.valid and lane.can_insert_at_back() then
+            local input = balancer.buffer[1]
+            if input and lane.insert_at_back(input) then
+                table.remove(balancer.buffer, 1)
+                balancer.global_accumulator = balancer.global_accumulator - 1.0
+                inserted = true
+            end
+        end
+
+        lane_index, lane = next(balancer.output_lanes, lane_index)
+        
+        if inserted then
+            balancer.next_output = lane_index
+            attempts = 0
+        else
+            attempts = attempts + 1
+        end
+        
+        if lane_index == starting_index and attempts >= output_lane_count then break end
     end
 end
 
----check if this balancer still needs to be tracked, if not, remove it from storage stack!
----@param balancer_index uint
----@param drop_to Item_drop_param
----@return boolean True if balancer is still tracked, false if balancer was removed
 function balancer_functions.check_track(balancer_index, drop_to)
     local balancer = storage.balancer[balancer_index]
+    if not balancer then return false end
+
     if table_size(balancer.parts) == 0 then
-        -- balancer is not valid, remove it from storage stack
         if table_size(balancer.output_lanes) > 0 or table_size(balancer.input_lanes) > 0 then
-            print("Belt-balancer: Something is off with the removing of balancer lanes")
-            print("balancer: ", balancer_index)
-            print(serpent.block(storage.balancer))
+            return true 
         end
-
         balancer_functions.empty_buffer(balancer, drop_to)
-
         storage.balancer[balancer_index] = nil
-
         return false
     end
-
     return true
 end
 
----empty_buffer
----@overload fun(balancer:Balancer, buffer:LuaInventory)
----@param balancer Balancer
----@param drop_to Item_drop_param
 function balancer_functions.empty_buffer(balancer, drop_to)
     if drop_to.buffer and drop_to.buffer.valid then
         for _, item in pairs(balancer.buffer) do
             drop_to.buffer.insert(item)
         end
-    else
-        -- drop items on ground
-        for _, item in pairs(balancer.buffer) do
-            drop_to.surface.spill_item_stack{position=drop_to.position, stack=item, force=drop_to.force, max_radius=2}
-        end
     end
 end
 
----balancer_get_linked
----get all lined splitters into an array of LuaEntity
----@param balancer Balancer balancer to perform on
----@return LuaEntity[][]
 function balancer_functions.get_linked(balancer)
-    -- create matrix
     local matrix = {}
     for _, part_index in pairs(balancer.parts) do
         local part = storage.parts[part_index]
-        local pos = part.entity.position
-        if not matrix[pos.x] then
-            matrix[pos.x] = {}
+        if part and part.entity and part.entity.valid then
+            local pos = part.entity.position
+            if not matrix[pos.x] then matrix[pos.x] = {} end
+            matrix[pos.x][pos.y] = part.entity
         end
-        matrix[pos.x][pos.y] = part.entity
     end
-
     local curr_num = 0
     local result = {}
     repeat
@@ -320,40 +332,24 @@ function balancer_functions.get_linked(balancer)
     return result
 end
 
----balancer_expand_first
----expand the first found not expanded Element in the matrix
----@param matrix LuaEntity[][] matrix to perform logic on
----@param num number
 function balancer_functions.expand_first(matrix, num, result)
     for x_key, _ in pairs(matrix) do
-        local breaker = false
         for y_key, _ in pairs(matrix[x_key]) do
             if matrix[x_key][y_key] then
                 result[num] = {}
                 balancer_functions.expand_matrix(matrix, { x = x_key, y = y_key }, num, result)
-                breaker = true
-                break
+                return
             end
-        end
-
-        if breaker then
-            break
         end
     end
 end
 
----balancer_expand_matrix
----expand given element in the matrix and then expand its neighbours
----only expand if this element is not nil
 function balancer_functions.expand_matrix(matrix, pos, num, result)
     if matrix[pos.x] and matrix[pos.x][pos.y] then
         local part_entity = matrix[pos.x][pos.y]
         result[num][part_entity.unit_number] = part_entity
         matrix[pos.x][pos.y] = nil
-        if table_size(matrix[pos.x]) == 0 then
-            matrix[pos.x] = nil
-        end
-
+        if table_size(matrix[pos.x]) == 0 then matrix[pos.x] = nil end
         balancer_functions.expand_matrix(matrix, { x = pos.x - 1, y = pos.y }, num, result)
         balancer_functions.expand_matrix(matrix, { x = pos.x + 1, y = pos.y }, num, result)
         balancer_functions.expand_matrix(matrix, { x = pos.x, y = pos.y - 1 }, num, result)
@@ -361,84 +357,30 @@ function balancer_functions.expand_matrix(matrix, pos, num, result)
     end
 end
 
----create a new balancer with already created parts
----@param part_list LuaEntity[]
----@return Balancer
 function balancer_functions.new_from_part_list(part_list)
     local balancer = balancer_functions.new()
-
     for _, part_entity in pairs(part_list) do
         local part = storage.parts[part_entity.unit_number]
-
-        -- add part to balancer
-        balancer.parts[part_entity.unit_number] = part_entity.unit_number
-
-        -- add balancer to part
-        part.balancer = balancer.unit_number
-
-        for _, belt_index in pairs(part.input_belts) do
-            local belt = storage.belts[belt_index]
-
-            -- add balancer to belt
-            belt.output_balancer[balancer.unit_number] = balancer.unit_number
-        end
-
-        for _, belt_index in pairs(part.output_belts) do
-            local belt = storage.belts[belt_index]
-
-            -- add balancer to belt
-            belt.input_balancer[balancer.unit_number] = balancer.unit_number
-        end
-
-        -- add lanes to balancer
-        for lane_index, lane in pairs(part.input_lanes) do
-            balancer.input_lanes[lane_index] = lane
-        end
-        for lane_index, lane in pairs(part.output_lanes) do
-            balancer.output_lanes[lane_index] = lane
+        if part then
+            balancer.parts[part_entity.unit_number] = part_entity.unit_number
+            part.balancer = balancer.unit_number
+            balancer_functions.reload_lanes(balancer.unit_number)
         end
     end
-
-    balancer_functions.recalculate_nth_tick(balancer.unit_number)
-
     return balancer
 end
 
----check if this balancer still is one piece, if not, create multiple balancer if needed.
----@param balancer_index uint
----@param drop_to Item_drop_param
 function balancer_functions.check_connected(balancer_index, drop_to)
     local balancer = storage.balancer[balancer_index]
-
+    if not balancer then return end
+    
     local linked = balancer_functions.get_linked(balancer)
     if table_size(linked) > 1 then
-        -- unregister balancer, before splitting it
         unregister_on_tick(balancer_index)
-
-        -- create multiple new balancer
         for _, parts in pairs(linked) do
             balancer_functions.new_from_part_list(parts)
         end
-
-        -- remove old balancer from belts
-        for _, part_index in pairs(balancer.parts) do
-            local part = storage.parts[part_index]
-            for _, belt_index in pairs(part.input_belts) do
-                local belt = storage.belts[belt_index]
-                belt.input_balancer[balancer_index] = nil
-                belt.output_balancer[balancer_index] = nil
-            end
-            for _, belt_index in pairs(part.output_belts) do
-                local belt = storage.belts[belt_index]
-                belt.input_balancer[balancer_index] = nil
-                belt.output_balancer[balancer_index] = nil
-            end
-        end
-
-        -- clear the old balancer buffer
         balancer_functions.empty_buffer(balancer, drop_to)
-
-        -- finally, remove old balancer form storage stack
         storage.balancer[balancer_index] = nil
     end
 end
